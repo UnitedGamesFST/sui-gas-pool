@@ -69,6 +69,10 @@ pub enum GasPoolStorageConfig {
         redis_url: String,
         #[serde(default = "default_tls_enabled")]
         tls_enabled: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        password: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        port: Option<u16>,
     },
 }
 
@@ -81,6 +85,8 @@ impl Default for GasPoolStorageConfig {
         Self::Redis {
             redis_url: "redis://127.0.0.1:6379".to_string(),
             tls_enabled: false,
+            password: None,
+            port: None,
         }
     }
 }

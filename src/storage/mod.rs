@@ -76,8 +76,9 @@ pub async fn connect_storage(
     metrics: Arc<StorageMetrics>,
 ) -> Arc<dyn Storage> {
     let storage: Arc<dyn Storage> = match config {
-        GasPoolStorageConfig::Redis { redis_url, tls_enabled } => {
-            Arc::new(RedisStorage::new(redis_url, sponsor_address, metrics, *tls_enabled).await)
+        GasPoolStorageConfig::Redis { redis_url, tls_enabled, password, port } => {
+            let url = build_redis_url(redis_url, *tls_enabled, password, port);
+            Arc::new(RedisStorage::new(&url, sponsor_address, metrics, *tls_enabled).await)
         }
     };
     storage
@@ -86,6 +87,47 @@ pub async fn connect_storage(
         .expect("Unable to connect to the storage layer");
     storage.init_coin_stats_at_startup().await.unwrap();
     storage
+}
+
+fn build_redis_url(base_url: &str, tls_enabled: bool, password: &Option<String>, port: &Option<u16>) -> String {
+    let (mut host, path) = if base_url.contains("://") {
+        let parts: Vec<&str> = base_url.split("://").collect();
+        let host_path: Vec<&str> = parts[1].split('/').collect();
+        let host = host_path[0];
+        let path = if host_path.len() > 1 {
+            format!("/{}", host_path[1..].join("/"))
+        } else {
+            String::new()
+        };
+        (host.to_string(), path)
+    } else {
+        (base_url.to_string(), String::new())
+    };
+    
+    let protocol = if tls_enabled {
+        "rediss".to_string()
+    } else {
+        "redis".to_string()
+    };
+    
+    if let Some(pass) = password {
+        if !host.contains('@') {
+            host = format!("{}@{}", pass, host);
+        }
+    }
+    
+    if let Some(p) = port {
+        if !host.contains(':') && !host.split('@').last().unwrap_or(&host).contains(':') {
+            let parts: Vec<&str> = host.split('@').collect();
+            if parts.len() > 1 {
+                host = format!("{}@{}:{}", parts[0], parts[1], p);
+            } else {
+                host = format!("{}:{}", host, p);
+            }
+        }
+    }
+    
+    format!("{}://{}{}", protocol, host, path)
 }
 
 #[cfg(test)]

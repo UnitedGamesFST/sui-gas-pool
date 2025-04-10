@@ -30,15 +30,31 @@ impl RedisStorage {
         metrics: Arc<StorageMetrics>,
         tls_enabled: bool,
     ) -> Self {
-        // TLS가 활성화된 경우 또는 URL이 rediss://로 시작하는 경우,
-        // redis-rs 라이브러리는 자동으로 TLS를 처리합니다.
-        // 만약 TLS가 활성화되어 있지만 URL이 redis://로 시작하는 경우, rediss://로 변경합니다.
-        let url = if tls_enabled && redis_url.starts_with("redis://") {
-            redis_url.replace("redis://", "rediss://")
+        let url = if tls_enabled {
+            if redis_url.starts_with("rediss://") {
+                redis_url.to_string()
+            } 
+            else if redis_url.starts_with("redis://") {
+                redis_url.replace("redis://", "rediss://")
+            } 
+            else if redis_url.contains(":") && !redis_url.contains("://") {
+                if redis_url.contains("@") {
+                    format!("rediss://{}", redis_url)
+                } else {
+                    format!("rediss://{}", redis_url)
+                }
+            } else {
+                format!("rediss://{}", redis_url)
+            }
         } else {
-            redis_url.to_string()
+            if redis_url.starts_with("redis://") || redis_url.starts_with("rediss://") {
+                redis_url.to_string()
+            } else {
+                format!("redis://{}", redis_url)
+            }
         };
         
+        info!("Connecting to Redis with URL: {}", url);
         let client = redis::Client::open(url.as_str()).unwrap();
         let conn_manager = ConnectionManager::new(client).await.unwrap();
         Self {
@@ -250,7 +266,7 @@ impl Storage for RedisStorage {
 
     async fn check_health(&self) -> anyhow::Result<()> {
         let mut conn = self.conn_manager.clone();
-        redis::cmd("PING").query_async(&mut conn).await?;
+        redis::cmd("PING").query_async::<_, String>(&mut conn).await?;
         Ok(())
     }
 
