@@ -179,6 +179,7 @@ metrics-port: 9184
 gas-pool-config:
   redis:
     redis_url: "redis://127.0.0.1"
+    tls_enabled: false
 fullnode-url: "http://localhost:9000"
 coin-init-config:
   target-init-balance: 100000000
@@ -195,6 +196,7 @@ A description of these fields:
 - rpc-port: The port that RPC server runs on.
 - metrics-port: The port where some metric service could go and grab metrics and logging.
 - redis_url: The full URL of the Redis instance.
+- tls_enabled: Whether to use TLS for Redis connection. If set to true and redis_url starts with "redis://", it will be automatically changed to "rediss://". Default is false.
 - fullnode-url: The fullnode that the gas pool will be talking to.
 - coin-init-config
   - target-init-balance: The targeting initial balance of each coin (in MIST). For instance if you specify 100000000

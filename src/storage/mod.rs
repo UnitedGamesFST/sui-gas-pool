@@ -76,8 +76,8 @@ pub async fn connect_storage(
     metrics: Arc<StorageMetrics>,
 ) -> Arc<dyn Storage> {
     let storage: Arc<dyn Storage> = match config {
-        GasPoolStorageConfig::Redis { redis_url } => {
-            Arc::new(RedisStorage::new(redis_url, sponsor_address, metrics).await)
+        GasPoolStorageConfig::Redis { redis_url, tls_enabled } => {
+            Arc::new(RedisStorage::new(redis_url, sponsor_address, metrics, *tls_enabled).await)
         }
     };
     storage

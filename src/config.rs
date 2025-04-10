@@ -65,13 +65,22 @@ impl Default for GasStationConfig {
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum GasPoolStorageConfig {
-    Redis { redis_url: String },
+    Redis { 
+        redis_url: String,
+        #[serde(default = "default_tls_enabled")]
+        tls_enabled: bool,
+    },
+}
+
+fn default_tls_enabled() -> bool {
+    false
 }
 
 impl Default for GasPoolStorageConfig {
     fn default() -> Self {
         Self::Redis {
             redis_url: "redis://127.0.0.1:6379".to_string(),
+            tls_enabled: false,
         }
     }
 }

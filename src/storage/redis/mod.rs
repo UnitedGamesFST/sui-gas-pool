@@ -28,8 +28,18 @@ impl RedisStorage {
         redis_url: &str,
         sponsor_address: SuiAddress,
         metrics: Arc<StorageMetrics>,
+        tls_enabled: bool,
     ) -> Self {
-        let client = redis::Client::open(redis_url).unwrap();
+        // TLS가 활성화된 경우 또는 URL이 rediss://로 시작하는 경우,
+        // redis-rs 라이브러리는 자동으로 TLS를 처리합니다.
+        // 만약 TLS가 활성화되어 있지만 URL이 redis://로 시작하는 경우, rediss://로 변경합니다.
+        let url = if tls_enabled && redis_url.starts_with("redis://") {
+            redis_url.replace("redis://", "rediss://")
+        } else {
+            redis_url.to_string()
+        };
+        
+        let client = redis::Client::open(url.as_str()).unwrap();
         let conn_manager = ConnectionManager::new(client).await.unwrap();
         Self {
             conn_manager,
@@ -357,6 +367,7 @@ mod tests {
             "redis://127.0.0.1:6379",
             SuiAddress::ZERO,
             StorageMetrics::new_for_testing(),
+            false,
         )
         .await;
         storage.flush_db().await;
