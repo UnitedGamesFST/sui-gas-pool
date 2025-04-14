@@ -14,11 +14,11 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use sui_types::base_types::{ObjectDigest, ObjectID, SequenceNumber, SuiAddress};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
+use redis::Client;
 
 pub struct RedisStorage {
-    conn_manager: ConnectionManager,
-    // String format of the sponsor address to avoid converting it to string multiple times.
+    conn: ConnectionManager,
     sponsor_str: String,
     metrics: Arc<StorageMetrics>,
 }
@@ -29,39 +29,45 @@ impl RedisStorage {
         sponsor_address: SuiAddress,
         metrics: Arc<StorageMetrics>,
         tls_enabled: bool,
+        password: &Option<String>,
     ) -> Self {
-        let url = if tls_enabled {
-            if redis_url.starts_with("rediss://") {
-                redis_url.to_string()
-            } 
-            else if redis_url.starts_with("redis://") {
-                redis_url.replace("redis://", "rediss://")
-            } 
-            else if redis_url.contains(":") && !redis_url.contains("://") {
-                if redis_url.contains("@") {
-                    format!("rediss://{}", redis_url)
+        let mut url = redis_url.to_string();
+        if tls_enabled {
+            if !url.contains("insecure=true") {
+                if url.contains("?") {
+                    url.push_str("&insecure=true");
                 } else {
-                    format!("rediss://{}", redis_url)
+                    url.push_str("?insecure=true");
                 }
-            } else {
-                format!("rediss://{}", redis_url)
             }
-        } else {
-            if redis_url.starts_with("redis://") || redis_url.starts_with("rediss://") {
-                redis_url.to_string()
-            } else {
-                format!("redis://{}", redis_url)
-            }
-        };
-        
+        }
+
         info!("Connecting to Redis with URL: {}", url);
-        let client = redis::Client::open(url.as_str()).unwrap();
+        
+        let client = Client::open(url.as_str()).unwrap();
         let conn_manager = ConnectionManager::new(client).await.unwrap();
-        Self {
-            conn_manager,
+        
+        let storage = Self {
+            conn: conn_manager,
             sponsor_str: sponsor_address.to_string(),
             metrics,
+        };
+        
+        if let Some(pass) = password {
+            debug!("Authenticating with Redis using explicit AUTH command");
+            let mut conn = storage.conn.clone();
+            
+            match redis::cmd("AUTH")
+                .arg(pass)
+                .query_async::<_, String>(&mut conn)
+                .await 
+            {
+                Ok(_) => debug!("Redis 인증 성공"),
+                Err(err) => warn!("Redis 인증 실패: {}", err),
+            }
         }
+        
+        storage
     }
 }
 
@@ -77,7 +83,7 @@ impl Storage for RedisStorage {
         let expiration_time = Utc::now()
             .add(Duration::from_millis(reserved_duration_ms))
             .timestamp_millis() as u64;
-        let mut conn = self.conn_manager.clone();
+        let mut conn = self.conn.clone();
         let (reservation_id, coins, new_total_balance, new_coin_count): (
             ReservationID,
             Vec<String>,
@@ -89,9 +95,7 @@ impl Storage for RedisStorage {
             .arg(expiration_time)
             .invoke_async(&mut conn)
             .await?;
-        // The script returns (0, []) if it is unable to find enough coins to reserve.
-        // We choose to handle the error here instead of inside the script so that we could
-        // provide a more readable error message.
+
         if coins.is_empty() {
             return Err(anyhow::anyhow!(
                 "Unable to reserve gas coins for the given budget."
@@ -100,7 +104,6 @@ impl Storage for RedisStorage {
         let gas_coins: Vec<_> = coins
             .into_iter()
             .map(|s| {
-                // Each coin is in the form of: balance,object_id,version,digest
                 let mut splits = s.split(',');
                 let balance = splits.next().unwrap().parse::<u64>().unwrap();
                 let object_id = ObjectID::from_str(splits.next().unwrap()).unwrap();
@@ -128,7 +131,7 @@ impl Storage for RedisStorage {
     async fn ready_for_execution(&self, reservation_id: ReservationID) -> anyhow::Result<()> {
         self.metrics.num_ready_for_execution_requests.inc();
 
-        let mut conn = self.conn_manager.clone();
+        let mut conn = self.conn.clone();
         ScriptManager::ready_for_execution_script()
             .arg(self.sponsor_str.clone())
             .arg(reservation_id)
@@ -146,9 +149,6 @@ impl Storage for RedisStorage {
         let formatted_coins = new_coins
             .iter()
             .map(|c| {
-                // The format is: balance,object_id,version,digest
-                // The way we turn them into strings must be consistent with the way we parse them in
-                // reserve_gas_coins_script.
                 format!(
                     "{},{},{},{}",
                     c.balance,
@@ -159,7 +159,7 @@ impl Storage for RedisStorage {
             })
             .collect::<Vec<String>>();
 
-        let mut conn = self.conn_manager.clone();
+        let mut conn = self.conn.clone();
         let (new_total_balance, new_coin_count): (i64, i64) = ScriptManager::add_new_coins_script()
             .arg(self.sponsor_str.clone())
             .arg(serde_json::to_string(&formatted_coins)?)
@@ -186,13 +186,13 @@ impl Storage for RedisStorage {
         self.metrics.num_expire_coins_requests.inc();
 
         let now = Utc::now().timestamp_millis() as u64;
-        let mut conn = self.conn_manager.clone();
+        let mut conn = self.conn.clone();
         let expired_coin_strings: Vec<String> = ScriptManager::expire_coins_script()
             .arg(self.sponsor_str.clone())
             .arg(now)
             .invoke_async(&mut conn)
             .await?;
-        // The script returns a list of comma separated coin ids.
+
         let expired_coin_ids = expired_coin_strings
             .iter()
             .flat_map(|s| s.split(',').map(|id| ObjectID::from_str(id).unwrap()))
@@ -203,7 +203,7 @@ impl Storage for RedisStorage {
     }
 
     async fn init_coin_stats_at_startup(&self) -> anyhow::Result<(u64, u64)> {
-        let mut conn = self.conn_manager.clone();
+        let mut conn = self.conn.clone();
         let (available_coin_count, available_coin_total_balance): (i64, i64) =
             ScriptManager::init_coin_stats_at_startup_script()
                 .arg(self.sponsor_str.clone())
@@ -230,7 +230,7 @@ impl Storage for RedisStorage {
     }
 
     async fn is_initialized(&self) -> anyhow::Result<bool> {
-        let mut conn = self.conn_manager.clone();
+        let mut conn = self.conn.clone();
         let result = ScriptManager::get_is_initialized_script()
             .arg(self.sponsor_str.clone())
             .invoke_async::<_, bool>(&mut conn)
@@ -239,7 +239,7 @@ impl Storage for RedisStorage {
     }
 
     async fn acquire_init_lock(&self, lock_duration_sec: u64) -> anyhow::Result<bool> {
-        let mut conn = self.conn_manager.clone();
+        let mut conn = self.conn.clone();
         let cur_timestamp = Utc::now().timestamp() as u64;
         debug!(
             "Acquiring init lock at {} for {} seconds",
@@ -256,7 +256,7 @@ impl Storage for RedisStorage {
 
     async fn release_init_lock(&self) -> anyhow::Result<()> {
         debug!("Releasing the init lock.");
-        let mut conn = self.conn_manager.clone();
+        let mut conn = self.conn.clone();
         ScriptManager::release_init_lock_script()
             .arg(self.sponsor_str.clone())
             .invoke_async::<_, ()>(&mut conn)
@@ -265,14 +265,14 @@ impl Storage for RedisStorage {
     }
 
     async fn check_health(&self) -> anyhow::Result<()> {
-        let mut conn = self.conn_manager.clone();
+        let mut conn = self.conn.clone();
         redis::cmd("PING").query_async::<_, String>(&mut conn).await?;
         Ok(())
     }
 
     #[cfg(test)]
     async fn flush_db(&self) {
-        let mut conn = self.conn_manager.clone();
+        let mut conn = self.conn.clone();
         redis::cmd("FLUSHDB")
             .query_async::<_, String>(&mut conn)
             .await
@@ -280,7 +280,7 @@ impl Storage for RedisStorage {
     }
 
     async fn get_available_coin_count(&self) -> anyhow::Result<usize> {
-        let mut conn = self.conn_manager.clone();
+        let mut conn = self.conn.clone();
         let count = ScriptManager::get_available_coin_count_script()
             .arg(self.sponsor_str.clone())
             .invoke_async::<_, usize>(&mut conn)
@@ -289,7 +289,7 @@ impl Storage for RedisStorage {
     }
 
     async fn get_available_coin_total_balance(&self) -> u64 {
-        let mut conn = self.conn_manager.clone();
+        let mut conn = self.conn.clone();
         ScriptManager::get_available_coin_total_balance_script()
             .arg(self.sponsor_str.clone())
             .invoke_async::<_, u64>(&mut conn)
@@ -299,7 +299,7 @@ impl Storage for RedisStorage {
 
     #[cfg(test)]
     async fn get_reserved_coin_count(&self) -> usize {
-        let mut conn = self.conn_manager.clone();
+        let mut conn = self.conn.clone();
         ScriptManager::get_reserved_coin_count_script()
             .arg(self.sponsor_str.clone())
             .invoke_async::<_, usize>(&mut conn)
@@ -310,6 +310,7 @@ impl Storage for RedisStorage {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
     use sui_types::base_types::{random_object_ref, SuiAddress};
 
     use crate::{
@@ -382,8 +383,9 @@ mod tests {
         let storage = RedisStorage::new(
             "redis://127.0.0.1:6379",
             SuiAddress::ZERO,
-            StorageMetrics::new_for_testing(),
+            Arc::new(StorageMetrics::new_for_testing()),
             false,
+            &None,
         )
         .await;
         storage.flush_db().await;

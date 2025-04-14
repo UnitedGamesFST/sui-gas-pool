@@ -77,8 +77,8 @@ pub async fn connect_storage(
 ) -> Arc<dyn Storage> {
     let storage: Arc<dyn Storage> = match config {
         GasPoolStorageConfig::Redis { redis_url, tls_enabled, password, port } => {
-            let url = build_redis_url(redis_url, *tls_enabled, password, port);
-            Arc::new(RedisStorage::new(&url, sponsor_address, metrics, *tls_enabled).await)
+            let url = build_redis_url(redis_url, *tls_enabled, port);
+            Arc::new(RedisStorage::new(&url, sponsor_address, metrics, *tls_enabled, password).await)
         }
     };
     storage
@@ -89,45 +89,31 @@ pub async fn connect_storage(
     storage
 }
 
-fn build_redis_url(base_url: &str, tls_enabled: bool, password: &Option<String>, port: &Option<u16>) -> String {
-    let (mut host, path) = if base_url.contains("://") {
-        let parts: Vec<&str> = base_url.split("://").collect();
-        let host_path: Vec<&str> = parts[1].split('/').collect();
-        let host = host_path[0];
-        let path = if host_path.len() > 1 {
-            format!("/{}", host_path[1..].join("/"))
+fn build_redis_url(base_url: &str, tls_enabled: bool, port: &Option<u16>) -> String {
+    let clean_base = if base_url.contains('@') {
+        let parts: Vec<&str> = base_url.split('@').collect();
+        if parts.len() > 1 {
+            parts[1].to_string()
         } else {
-            String::new()
-        };
-        (host.to_string(), path)
+            base_url.to_string()
+        }
     } else {
-        (base_url.to_string(), String::new())
+        base_url.to_string()
     };
     
-    let protocol = if tls_enabled {
-        "rediss".to_string()
+    let protocol = if tls_enabled { "rediss" } else { "redis" };
+    
+    let host_port = if let Some(p) = port {
+        if clean_base.contains(':') {
+            clean_base
+        } else {
+            format!("{}:{}", clean_base, p)
+        }
     } else {
-        "redis".to_string()
+        clean_base
     };
     
-    if let Some(pass) = password {
-        if !host.contains('@') {
-            host = format!("{}@{}", pass, host);
-        }
-    }
-    
-    if let Some(p) = port {
-        if !host.contains(':') && !host.split('@').last().unwrap_or(&host).contains(':') {
-            let parts: Vec<&str> = host.split('@').collect();
-            if parts.len() > 1 {
-                host = format!("{}@{}:{}", parts[0], parts[1], p);
-            } else {
-                host = format!("{}:{}", host, p);
-            }
-        }
-    }
-    
-    format!("{}://{}{}", protocol, host, path)
+    format!("{}://{}", protocol, host_port)
 }
 
 #[cfg(test)]
@@ -142,9 +128,7 @@ pub async fn connect_storage_for_testing_with_config(
 
     let storage = connect_storage(config, sponsor_address, StorageMetrics::new_for_testing()).await;
     if is_first_call {
-        // Make sure that we only flush the DB once at the beginning of each test run.
         storage.flush_db().await;
-        // Re-init coin stats again since we just flushed.
         storage.init_coin_stats_at_startup().await.unwrap();
     }
     storage
@@ -196,7 +180,6 @@ mod tests {
         let storage = connect_storage_for_testing(sponsor).await;
         assert!(!storage.is_initialized().await.unwrap());
         storage.add_new_coins(vec![]).await.unwrap();
-        // Still not initialized because we are not adding any coins.
         assert!(!storage.is_initialized().await.unwrap());
         storage
             .add_new_coins(vec![GasCoin {
@@ -210,7 +193,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_successful_reservation() {
-        // Create a gas pool of 100000 coins, each with balance of 1.
         let sponsor = SuiAddress::random_for_testing_only();
         let storage = setup(sponsor, vec![1; 100000]).await;
         assert_coin_count(&storage, 100000, 0).await;
@@ -251,8 +233,6 @@ mod tests {
         let sponsor = SuiAddress::random_for_testing_only();
         let storage = setup(sponsor, vec![1; 100]).await;
         for _ in 0..100 {
-            // Keep reserving and putting them back.
-            // Should be able to repeat this process indefinitely if balance are not changed.
             let (res_id, reserved_gas_coins) = storage.reserve_gas_coins(99, 1000).await.unwrap();
             assert_eq!(reserved_gas_coins.len(), 99);
             assert_coin_count(&storage, 1, 99).await;
@@ -308,7 +288,6 @@ mod tests {
         assert_eq!(reserved_gas_coins1.len(), 10);
         let (_res_id2, reserved_gas_coins2) = storage.reserve_gas_coins(30, 1900).await.unwrap();
         assert_eq!(reserved_gas_coins2.len(), 30);
-        // Just to make sure these two reservations will have a different expiration timestamp.
         tokio::time::sleep(Duration::from_millis(1)).await;
         let (_res_id3, reserved_gas_coins3) = storage.reserve_gas_coins(50, 1900).await.unwrap();
         assert_eq!(reserved_gas_coins3.len(), 50);
@@ -382,7 +361,6 @@ mod tests {
             reserved_gas_coins.extend(handle.await.unwrap());
         }
         let count = reserved_gas_coins.len();
-        // Check that all object IDs are unique in all reservations.
         reserved_gas_coins.sort_by_key(|c| c.object_ref.0);
         reserved_gas_coins.dedup_by_key(|c| c.object_ref.0);
         assert_eq!(reserved_gas_coins.len(), count);
@@ -403,8 +381,6 @@ mod tests {
     async fn test_init_coin_stats_idempotent() {
         let sponsor = SuiAddress::random_for_testing_only();
         let storage = setup(sponsor, vec![1; 100]).await;
-        // init_coin_stats_at_startup has already been called in setup.
-        // Calling it again should not change anything.
         let (coin_count, total_balance) = storage.init_coin_stats_at_startup().await.unwrap();
         assert_eq!(coin_count, 100);
         assert_eq!(total_balance, 100);
