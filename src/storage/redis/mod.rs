@@ -62,8 +62,8 @@ impl RedisStorage {
                 .query_async::<_, String>(&mut conn)
                 .await 
             {
-                Ok(_) => debug!("Redis 인증 성공"),
-                Err(err) => warn!("Redis 인증 실패: {}", err),
+                Ok(_) => debug!("Redis Auth Success"),
+                Err(err) => warn!("Redis Auth Failed: {}", err),
             }
         }
         
