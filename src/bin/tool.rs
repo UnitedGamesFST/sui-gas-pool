@@ -120,6 +120,9 @@ impl ToolCommand {
                     signer_config,
                     gas_pool_config: GasPoolStorageConfig::Redis {
                         redis_url: "redis://127.0.0.1".to_string(),
+                        tls_enabled: false,
+                        password: None,
+                        port: None,
                     },
                     ..Default::default()
                 };
