@@ -1,5 +1,137 @@
 # Azure HSM Sidecar
 
+A sidecar server for signing Sui transactions using Azure Key Vault HSM.
+
+## ✨ Features
+
+- 🔐 Secure signing with Azure Key Vault HSM (private keys never leave HSM)
+- 🌐 REST API for Sui transaction signing
+- 🔑 Sui public key address retrieval
+- 📝 Concise logging system
+- ⚡ Implemented in TypeScript
+
+## 🚀 Installation
+
+```bash
+npm install
+```
+
+## ⚙️ Environment Setup
+
+Create a `.env` file and configure the following environment variables:
+
+```env
+AZURE_KEYVAULT_NAME=your-keyvault-name
+AZURE_KEY_NAME=your-key-name
+AZURE_CLIENT_ID=your-client-id
+AZURE_CLIENT_SECRET=your-client-secret
+AZURE_TENANT_ID=your-tenant-id
+PORT=9001
+```
+
+## 📖 Usage
+
+### Start Server
+```bash
+npm start
+# or
+npx ts-node index.ts
+```
+
+### Test
+```bash
+npx ts-node test.ts
+```
+
+## 🌐 API Endpoints
+
+### Health Check
+```http
+GET /
+```
+
+### Get Public Key Address
+```http
+GET /azure-hsm/get-pubkey-address
+```
+
+**Response:**
+```json
+{
+  "suiPubkeyAddress": "0x9dfd92812dc9591424eaa88cb154345656b9c3fcfee19b490c67bb1393dbcf7e"
+}
+```
+
+### Sign Transaction
+```http
+POST /azure-hsm/sign-transaction
+Content-Type: application/json
+
+{
+  "txBytes": "base64-encoded-transaction-bytes"
+}
+```
+
+**Response:**
+```json
+{
+  "signature": "base64-encoded-sui-signature"
+}
+```
+
+## 🔧 Troubleshooting
+
+### Authentication Error
+```
+AADSTS7000215: Invalid client secret provided
+```
+**Solution:** Regenerate the Service Principal's client secret.
+```bash
+az ad sp credential reset --id "your-client-id"
+```
+
+### Key Vault Access Error
+```
+Access denied
+```
+**Solution:** Check Key Vault permissions.
+```bash
+az keyvault set-policy --name "your-keyvault" --spn "your-client-id" --key-permissions get sign verify
+```
+
+### Key Format Error
+```
+KeyVault key must be EC with secp256k1 curve (P-256K)
+```
+**Solution:** Create an EC key using secp256k1 (P-256K) curve in Key Vault.
+
+## 📁 Project Structure
+
+```
+azure_hsm_sidecar/
+├── azureUtils.ts      # Azure Key Vault HSM utilities
+├── index.ts           # Express server and API endpoints
+├── test.ts            # Test scripts
+├── package.json       # Dependencies and scripts
+├── tsconfig.json      # TypeScript configuration
+└── README.md          # This file
+```
+
+## 🔒 Security
+
+- Private keys never leave the HSM
+- All signing operations performed inside Azure HSM
+- Secure authentication via Service Principal
+- Sensitive information managed through environment variables
+
+## 📝 License
+
+This project is part of the Sui Gas Pool project.
+
+---
+
+# Azure HSM Sidecar (한국어)
+
 Azure Key Vault HSM을 사용하여 Sui 트랜잭션에 서명하는 사이드카 서버입니다.
 
 ## ✨ 기능
@@ -126,4 +258,4 @@ azure_hsm_sidecar/
 
 ## 📝 라이선스
 
-이 프로젝트는 Sui Gas Pool 프로젝트의 일부입니다. 
+이 프로젝트는 Sui Gas Pool 프로젝트의 일부입니다.
