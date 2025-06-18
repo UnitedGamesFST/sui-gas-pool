@@ -35,11 +35,11 @@ async function main() {
     
     console.log(`🚀 Azure HSM Sidecar - Port: ${port} - KeyVault: ${process.env.AZURE_KEYVAULT_NAME} - Key: ${process.env.AZURE_KEY_NAME}`);
     
-    app.get("/", (req: Request, res: Response) => {
+    app.get("/", (_req: Request, res: Response) => {
         res.send("Azure HSM Signer!");
     });
 
-    app.get("/azure-hsm/get-pubkey-address", async (req: Request, res: Response): Promise<void> => {
+    app.get("/azure-hsm/get-pubkey-address", async (_req: Request, res: Response): Promise<void> => {
         try {
             const keyName = process.env.AZURE_KEY_NAME || "";
             if (!keyName) {

@@ -9,7 +9,6 @@ import {
 import { 
     SIGNATURE_SCHEME_TO_FLAG,
     messageWithIntent,
-    IntentScope,
 } from "@mysten/sui/cryptography";
 import { 
     Secp256k1PublicKey 
@@ -163,7 +162,8 @@ export async function signAndVerify(txBytes: Uint8Array): Promise<string | undef
     }
 }
 
-// DER 인코딩 서명을 r, s로 파싱하는 함수
+/*
+// DER 인코딩 서명을 r, s로 파싱하는 함수 (현재 사용하지 않음)
 function parseDERSignature(derSignature: Buffer): { r: Buffer; s: Buffer } {
     let offset = 0;
     
@@ -205,7 +205,8 @@ function parseDERSignature(derSignature: Buffer): { r: Buffer; s: Buffer } {
     return { r: rPadded, s: sPadded };
 }
 
-// 필요한 경우 패딩 처리 (32바이트)
+
+// 필요한 경우 패딩 처리 (32바이트) - 현재 사용하지 않음
 function padTo32Bytes(buffer: Buffer): Buffer {
     if (buffer.length === 32) {
         return buffer;
@@ -221,3 +222,4 @@ function padTo32Bytes(buffer: Buffer): Buffer {
     buffer.copy(padded, 32 - buffer.length);
     return padded;
 }
+*/
