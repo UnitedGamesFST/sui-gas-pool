@@ -1,14 +1,17 @@
+import "dotenv/config";
 import express from "express";
 import { fromBase64 } from "@mysten/sui/utils";
 import { Secp256k1PublicKey } from "@mysten/sui/keypairs/secp256k1";
-import { getPublicKey, signAndVerify } from "./awsUtils";
+import { getPublicKey, signAndVerify } from "./awsUtils.js";
+import logger from "./logger.js";
+import { z } from "zod";
 
 async function main() {
     const app = express();
     app.use(express.json());
     const port = 3000;
-    app.get("/", (req, res) => {
-        res.send("KMS Signer Demo!");
+    app.get("/", (_req, res) => {
+        res.send("AWS KMS Sui Signer running");
     });
 
     app.get("/aws-kms/get-pubkey-address", async (req, res) => {
@@ -28,26 +31,24 @@ async function main() {
 
     app.post("/aws-kms/sign-transaction", async (req, res) => {
         try {
-            const { txBytes } = req.body;
-
-            if (!txBytes) {
-                return res
-                    .status(400)
-                    .send("Missing transaction bytes or keyId");
+            const schema = z.object({ txBytes: z.string().max(10000) });
+            const parseResult = schema.safeParse(req.body);
+            if (!parseResult.success) {
+                return res.status(400).json({ error: "Invalid request body" });
             }
 
-            const txBytesArray = fromB64(txBytes);
-            const signature = await signAndVerify(txBytesArray);
+            const txBytesArray = fromBase64(parseResult.data.txBytes);
 
+            const signature = await signAndVerify(txBytesArray);
             res.json({ signature });
-        } catch (error) {
-            console.error(error);
-            res.status(500).send("Internal server error");
+        } catch (err: any) {
+            logger.error({ err }, "Signature generation failed");
+            res.status(400).json({ error: err.message ?? "Signature error" });
         }
     });
 
     app.listen(port, () => {
-        console.log(`Example app listening at http://localhost:${port}`);
+        logger.info(`AWS KMS Signer listening at http://localhost:${port}`);
     });
 }
 
