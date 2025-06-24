@@ -9,7 +9,8 @@ import { z } from "zod";
 async function main() {
     const app = express();
     app.use(express.json());
-    const port = 3000;
+    const port = process.env.PORT ? Number(process.env.PORT) : 9001;
+    
     app.get("/", (_req, res) => {
         res.send("AWS KMS Sui Signer running");
     });
