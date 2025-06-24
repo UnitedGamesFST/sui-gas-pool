@@ -15,6 +15,10 @@ async function main() {
         res.send("AWS KMS Sui Signer running");
     });
 
+    app.get("/health", (_req, res) => {
+        res.json({ ok: true });
+    });
+
     app.get("/aws-kms/get-pubkey-address", async (req, res) => {
         try {
             const keyId = process.env.AWS_KMS_KEY_ID || "";

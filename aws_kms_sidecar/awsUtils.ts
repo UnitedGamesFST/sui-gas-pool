@@ -22,8 +22,10 @@ import { blake2b } from "@noble/hashes/blake2";
 import { secp256k1 } from "@noble/curves/secp256k1";
 
 import logger from "./logger.js";
-import * as asn1ts from "asn1-ts";
-const { DERElement: AsnDerElement, ASN1TagClass, ASN1Construction } = asn1ts as any;
+
+import * as asn1tsNs from "asn1-ts";
+const asn1ts: any = (asn1tsNs as any).default ?? asn1tsNs;
+const { DERElement: AsnDerElement, ASN1TagClass, ASN1Construction } = asn1ts;
 
 // https://datatracker.ietf.org/doc/html/rfc5480#section-2.2
 // https://www.secg.org/sec1-v2.pdf
