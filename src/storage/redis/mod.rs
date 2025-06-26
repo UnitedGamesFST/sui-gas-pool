@@ -9,16 +9,16 @@ use crate::storage::Storage;
 use crate::types::{GasCoin, ReservationID};
 use chrono::Utc;
 use redis::aio::ConnectionManager;
+use redis::Client;
 use std::ops::Add;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use sui_types::base_types::{ObjectDigest, ObjectID, SequenceNumber, SuiAddress};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 pub struct RedisStorage {
     conn_manager: ConnectionManager,
-    // String format of the sponsor address to avoid converting it to string multiple times.
     sponsor_str: String,
     metrics: Arc<StorageMetrics>,
 }
@@ -28,14 +28,40 @@ impl RedisStorage {
         redis_url: &str,
         sponsor_address: SuiAddress,
         metrics: Arc<StorageMetrics>,
+        tls_enabled: bool,
+        password: &Option<String>,
     ) -> Self {
-        let client = redis::Client::open(redis_url).unwrap();
+        let mut url = redis_url.to_string();
+        if tls_enabled {
+            if !url.contains("insecure=true") {
+                if url.contains("?") {
+                    url.push_str("&insecure=true");
+                } else {
+                    url.push_str("?insecure=true");
+                }
+            }
+        }
+        info!("Connecting to Redis with URL: {}", url);
+        let client = Client::open(url.as_str()).unwrap();
         let conn_manager = ConnectionManager::new(client).await.unwrap();
-        Self {
+        let storage = Self {
             conn_manager,
             sponsor_str: sponsor_address.to_string(),
             metrics,
+        };
+        if let Some(pass) = password {
+            debug!("Authenticating with Redis using explicit AUTH command");
+            let mut conn = storage.conn_manager.clone();
+            match redis::cmd("AUTH")
+                .arg(pass)
+                .query_async::<_, String>(&mut conn)
+                .await
+            {
+                Ok(_) => debug!("Redis Auth Success"),
+                Err(err) => warn!("Redis Auth Failed: {}", err),
+            }
         }
+        storage
     }
 }
 
@@ -357,6 +383,8 @@ mod tests {
             "redis://127.0.0.1:6379",
             SuiAddress::ZERO,
             StorageMetrics::new_for_testing(),
+            false,
+            &None,
         )
         .await;
         storage.flush_db().await;
