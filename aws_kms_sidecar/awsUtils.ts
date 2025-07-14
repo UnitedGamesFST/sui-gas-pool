@@ -6,24 +6,26 @@ import {
 } from "@aws-sdk/client-kms";
 
 import { Secp256k1PublicKey } from "@mysten/sui/keypairs/secp256k1";
-import { fromBase64, toBase64 } from "@mysten/sui/utils";
+import { toBase64 } from "@mysten/sui/utils";
 
 import {
     toSerializedSignature,
     SIGNATURE_FLAG_TO_SCHEME,
     SignatureScheme,
     SignatureFlag,
-    messageWithIntent,
-    IntentScope
+    messageWithIntent
 } from "@mysten/sui/cryptography";
 
-import { Transaction } from "@mysten/sui/transactions";
-import { getFullnodeUrl, SuiClient } from "@mysten/sui/client";
-import { blake2b } from "@noble/hashes/blake2b";
+
+import { blake2b } from "@noble/hashes/blake2";
 
 import { secp256k1 } from "@noble/curves/secp256k1";
 
-import * as asn1ts from "asn1-ts";
+import logger from "./logger.js";
+
+import * as asn1tsNs from "asn1-ts";
+const asn1ts: any = (asn1tsNs as any).default ?? asn1tsNs;
+const { DERElement: AsnDerElement, ASN1TagClass, ASN1Construction } = asn1ts;
 
 // https://datatracker.ietf.org/doc/html/rfc5480#section-2.2
 // https://www.secg.org/sec1-v2.pdf
@@ -63,15 +65,17 @@ function compressPublicKeyClamped(
     return new Uint8Array([parityByte, ...xCoord]);
 }
 
-function createAWSKMSClient() {
-    const client = new KMSClient({
+let kmsClient: KMSClient | null = null;
+function getKmsClient(): KMSClient {
+    if (kmsClient) return kmsClient;
+    kmsClient = new KMSClient({
         region: process.env.AWS_REGION || "",
         credentials: {
             accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
             secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
         },
     });
-    return client;
+    return kmsClient;
 }
 
 export async function getPublicKey(keyId: string) {
@@ -79,7 +83,7 @@ export async function getPublicKey(keyId: string) {
     // returns Sui Public Key
 
     // AWS KMS client configuration
-    const client = createAWSKMSClient();
+    const client = getKmsClient();
 
     try {
         const getPublicKeyCommand = new GetPublicKeyCommand({
@@ -89,15 +93,15 @@ export async function getPublicKey(keyId: string) {
         const publicKey = publicKeyResponse.PublicKey || new Uint8Array();
 
         let encodedData: Uint8Array = publicKey;
-        let derElement: asn1ts.DERElement = new asn1ts.DERElement();
+        const derElement = new AsnDerElement();
         derElement.fromBytes(encodedData);
 
         // https://datatracker.ietf.org/doc/html/rfc5480#section-2.2
         // parse ANS1 DER response and get raw public key bytes
         // actual result is a BIT_STRING of length 520-bits (65 bytes)
         if (
-            derElement.tagClass === asn1ts.ASN1TagClass.universal &&
-            derElement.construction === asn1ts.ASN1Construction.constructed
+            derElement.tagClass === ASN1TagClass.universal &&
+            derElement.construction === ASN1Construction.constructed
         ) {
             let components = derElement.components;
             let publicKeyElement = components[1];
@@ -110,14 +114,14 @@ export async function getPublicKey(keyId: string) {
                 ? new Secp256k1PublicKey(compressedKey)
                 : "";
             if (sui_public_key instanceof Secp256k1PublicKey) {
-                console.log("Sui Public Key:", sui_public_key.toSuiAddress());
+                logger.info({ address: sui_public_key.toSuiAddress() }, "Fetched Sui public key");
             }
             return sui_public_key;
         } else {
             throw new Error("Unexpected ASN.1 structure");
         }
     } catch (error) {
-        console.error("Error during get public key:", error);
+        logger.error({ err: error }, "Error fetching public key");
         return;
     }
 }
@@ -129,7 +133,7 @@ function getConcatenatedSignature(signature: Uint8Array): Uint8Array {
     // populate concatenatedSignature with [r,s] from DER signature
 
     let encodedData: Uint8Array = signature || new Uint8Array();
-    let derElement: asn1ts.DERElement = new asn1ts.DERElement();
+    const derElement = new AsnDerElement();
     derElement.fromBytes(encodedData);
     let der_json_data: { value: string }[] = derElement.toJSON() as {
         value: any;
@@ -178,6 +182,7 @@ async function getSerializedSignature(
         signature: signature,
         publicKey: publicKeyToUse,
     });
+    logger.debug({ signature: serializedSignature }, "Serialized signature");
     return serializedSignature;
 }
 
@@ -187,18 +192,17 @@ export async function signAndVerify(tx_bytes: Uint8Array) {
     // verify signature using AWS KMS
 
     const keyId = process.env.AWS_KMS_KEY_ID || "";
-    const client = createAWSKMSClient();
+    const client = getKmsClient();
 
     // add intent Message to Transaction Bytes
     const intentMessage = messageWithIntent(
-        IntentScope.TransactionData,
+        "TransactionData",
         tx_bytes,
     );
     // digest needs to be hash of intent message
     // H(intent | tx_bytes)
     const digest = blake2b(intentMessage, { dkLen: 32 });
-    console.log("TX Bytes:", toBase64(tx_bytes));
-    console.log("Digest:", toBase64(digest));
+    logger.info({ tx_bytes: toBase64(tx_bytes), digest: toBase64(digest) }, "TX Bytes and Digest");
 
     try {
         // Sign the digest
@@ -223,16 +227,19 @@ export async function signAndVerify(tx_bytes: Uint8Array) {
             publicKeyToUse as Secp256k1PublicKey,
         );
 
-        console.log("Serialized Signature:", serializedSignature);
+        logger.debug({ serializedSignature }, "Serialized signature");
 
         // verify signature with sui
         if (publicKeyToUse !== undefined) {
-            console.log("Verifying Sui Signature against TX");
+            logger.debug("Verifying Sui signature against TX");
             const isValid = await publicKeyToUse.verifyTransaction(
                 tx_bytes,
                 serializedSignature,
             );
-            console.log("Sui Signature valid:", isValid);
+            logger.debug({ isValid }, "Sui signature validation result");
+            if (!isValid) {
+                throw new Error("Sui signature verification failed");
+            }
         }
 
         // Verify the signature in KMS
@@ -244,11 +251,14 @@ export async function signAndVerify(tx_bytes: Uint8Array) {
             SigningAlgorithm: "ECDSA_SHA_256",
         });
         const verifyResponse = await client.send(verifyCommand);
-        console.log("KMS Signature valid:", verifyResponse.SignatureValid);
+        logger.debug({ valid: verifyResponse.SignatureValid }, "KMS signature validation result");
+        if (!verifyResponse.SignatureValid) {
+            throw new Error("KMS signature verification failed");
+        }
 
         return serializedSignature;
     } catch (error) {
-        console.error("Error during sign/verify:", error);
+        logger.error({ err: error }, "Error during sign/verify");
     }
 }
 
