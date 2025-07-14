@@ -70,14 +70,46 @@ pub trait Storage: Sync + Send {
     async fn get_reserved_coin_count(&self) -> usize;
 }
 
+fn build_redis_url(redis_url: &str, tls_enabled: bool, password: &Option<String>, port: &Option<u16>) -> String {
+    let mut url = redis_url.to_string();
+    // 프로토콜 처리
+    if !url.starts_with("redis://") && !url.starts_with("rediss://") {
+        url = if tls_enabled {
+            format!("rediss://{}", url)
+        } else {
+            format!("redis://{}", url)
+        };
+    }
+    // 비밀번호 처리
+    if let Some(pw) = password {
+        // 이미 user:pass@host 형태면 skip
+        if !url.contains("@") {
+            let proto = if url.starts_with("rediss://") { "rediss://" } else { "redis://" };
+            let rest = url.trim_start_matches(proto);
+            url = format!("{}:{}@{}", proto, pw, rest);
+        }
+    }
+    // 포트 처리
+    if let Some(p) = port {
+        // 이미 :포트가 있으면 skip
+        let parts: Vec<&str> = url.rsplitn(2, ':').collect();
+        if parts.len() == 2 && parts[0].parse::<u16>().is_err() {
+            // 뒤에 포트가 없으면 추가
+            url = format!("{}:{}", url, p);
+        }
+    }
+    url
+}
+
 pub async fn connect_storage(
     config: &GasPoolStorageConfig,
     sponsor_address: SuiAddress,
     metrics: Arc<StorageMetrics>,
 ) -> Arc<dyn Storage> {
     let storage: Arc<dyn Storage> = match config {
-        GasPoolStorageConfig::Redis { redis_url } => {
-            Arc::new(RedisStorage::new(redis_url, sponsor_address, metrics).await)
+        GasPoolStorageConfig::Redis { redis_url, tls_enabled, password, port } => {
+            let url = build_redis_url(redis_url, *tls_enabled, password, port);
+            Arc::new(RedisStorage::new(&url, sponsor_address, metrics, *tls_enabled, password).await)
         }
     };
     storage
@@ -110,7 +142,12 @@ pub async fn connect_storage_for_testing_with_config(
 
 #[cfg(test)]
 pub async fn connect_storage_for_testing(sponsor_address: SuiAddress) -> Arc<dyn Storage> {
-    connect_storage_for_testing_with_config(&GasPoolStorageConfig::default(), sponsor_address).await
+    connect_storage_for_testing_with_config(&GasPoolStorageConfig::Redis {
+        redis_url: "redis://127.0.0.1:6379".to_string(),
+        tls_enabled: false,
+        password: None,
+        port: None,
+    }, sponsor_address).await
 }
 
 #[cfg(test)]
