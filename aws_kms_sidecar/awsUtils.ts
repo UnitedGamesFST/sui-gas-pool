@@ -68,13 +68,25 @@ function compressPublicKeyClamped(
 let kmsClient: KMSClient | null = null;
 function getKmsClient(): KMSClient {
     if (kmsClient) return kmsClient;
-    kmsClient = new KMSClient({
-        region: process.env.AWS_REGION || "",
-        credentials: {
-            accessKeyId: process.env.AWS_ACCESS_KEY_ID || "",
-            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || "",
-        },
-    });
+    const region = process.env.AWS_REGION || "";
+    // If explicit static credentials are provided via env vars, pass them. Otherwise
+    // fall back to the default AWS credential provider chain (IAM role, profile, etc.).
+    const accessKeyId = process.env.AWS_ACCESS_KEY_ID;
+    const secretAccessKey = process.env.AWS_SECRET_ACCESS_KEY;
+
+    if (accessKeyId && secretAccessKey) {
+        kmsClient = new KMSClient({
+            region,
+            credentials: {
+                accessKeyId,
+                secretAccessKey,
+                sessionToken: process.env.AWS_SESSION_TOKEN, // optional, only if present
+            },
+        });
+    } else {
+        // No static credentials: let the AWS SDK resolve credentials automatically
+        kmsClient = new KMSClient({ region });
+    }
     return kmsClient;
 }
 
@@ -122,7 +134,7 @@ export async function getPublicKey(keyId: string) {
         }
     } catch (error) {
         logger.error({ err: error }, "Error fetching public key");
-        return;
+        throw error;
     }
 }
 
