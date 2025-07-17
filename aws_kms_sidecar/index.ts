@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import { fromBase64 } from "@mysten/sui/utils";
 import { Secp256k1PublicKey } from "@mysten/sui/keypairs/secp256k1";
-import { getPublicKey, signAndVerify } from "./awsUtils.js";
+import { getPublicKey, signAndVerify, signMessageHash } from "./awsUtils.js";
 import logger from "./logger.js";
 import { z } from "zod";
 
@@ -48,6 +48,27 @@ async function main() {
             res.json({ signature });
         } catch (err: any) {
             logger.error({ err }, "Signature generation failed");
+            res.status(400).json({ error: err.message ?? "Signature error" });
+        }
+    });
+
+    // === Sign Message Hash ===
+    app.post("/aws-kms/sign-message", async (req, res) => {
+        try {
+            const schema = z.object({ hash: z.string().regex(/^0x[0-9a-fA-F]{64}$/) });
+            const parseResult = schema.safeParse(req.body);
+            if (!parseResult.success) {
+                return res.status(400).json({ error: "Invalid request body" });
+            }
+
+            const hashHex = parseResult.data.hash.slice(2); // strip 0x
+            const digest = new Uint8Array(hashHex.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)));
+
+            const { signature } = await signMessageHash(digest);
+
+            res.json({ signature });
+        } catch (err: any) {
+            logger.error({ err }, "Failed to sign message");
             res.status(400).json({ error: err.message ?? "Signature error" });
         }
     });
