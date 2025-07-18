@@ -18,6 +18,7 @@ import {
 
 
 import { blake2b } from "@noble/hashes/blake2";
+import { sha256 } from "@noble/hashes/sha2";
 
 import { secp256k1 } from "@noble/curves/secp256k1";
 
@@ -276,44 +277,37 @@ export async function signAndVerify(tx_bytes: Uint8Array) {
 
 /**
  * Sign a pre-computed 32-byte digest (e.g. sha3-256(message)) with AWS KMS.
- * The function returns the raw 64-byte `(r||s)` compact signature **and** the compressed secp256k1 public key.
- * Both are hex-encoded with `0x` prefix for easy consumption on-chain.
+ * Returns `{ signature: 0x<r||s hex> }` (compact 64B) after local verification.
  */
 export async function signMessageHash(digest: Uint8Array): Promise<{ signature: string }> {
     if (digest.length !== 32) {
-        throw new Error("Digest must be 32 bytes (sha3-256)");
+        throw new Error("Digest must be 32 bytes");
     }
 
     const keyId = process.env.AWS_KMS_KEY_ID || "";
     const client = getKmsClient();
 
-    // 1. Sign using KMS (we provide the digest directly)
-    const signCommand = new SignCommand({
+    // 1. Sign digest via KMS
+    const signResp = await client.send(new SignCommand({
         KeyId: keyId,
         Message: digest,
-        MessageType: "DIGEST",
+        MessageType: "RAW",
         SigningAlgorithm: "ECDSA_SHA_256",
-    });
-    const signResponse = await client.send(signCommand);
-    const derSignature = signResponse.Signature || new Uint8Array();
+    }));
+    const derSig = signResp.Signature || new Uint8Array();
 
-    // 2. Convert DER -> compact 64-byte
-    const compactSig = getConcatenatedSignature(derSignature);
+    // 2. DER → compact r||s (low-S)
+    const compactSig = getConcatenatedSignature(derSig);
 
-    // 3. Verify via KMS to double-check
-    const verifyCommand = new VerifyCommand({
-        KeyId: keyId,
-        Message: digest,
-        MessageType: "DIGEST",
-        Signature: derSignature,
-        SigningAlgorithm: "ECDSA_SHA_256",
-    });
-    const verifyResponse = await client.send(verifyCommand);
-    if (!verifyResponse.SignatureValid) {
-        throw new Error("KMS signature verification failed");
-    }
+    // 3. Fetch pubkey and verify locally
+    const pub = await getPublicKey(keyId);
+    const pubKey = pub instanceof Secp256k1PublicKey ? pub : undefined;
+    if (!pubKey) throw new Error("Unable to fetch public key");
+
+    const doubleHash = sha256(digest);
+    const ok = secp256k1.verify(compactSig, doubleHash, pubKey.toRawBytes());
+    if (!ok) throw new Error("Local signature verification failed");
 
     const sigHex = `0x${Buffer.from(compactSig).toString("hex")}`;
-
-    return { signature: sigHex};
+    return { signature: sigHex };
 }
