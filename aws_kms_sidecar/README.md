@@ -87,7 +87,17 @@ AWS KMS Sui Signer running
 
 오류 발생 시 `500 Internal Server Error`.
 
-### 4.4 `POST /aws-kms/sign-transaction`
+### 4.4 `GET /aws-kms/get-pubkey`
+설정된 `AWS_KMS_KEY_ID`의 공개키를 **압축 Secp256k1**(33바이트) 형식으로 조회해, `hex` 문자열(`0x...`)로 반환합니다.
+
+```
+200 OK
+{ "publicKey": "0x04a1..." }
+```
+
+오류 발생 시 `500 Internal Server Error`.
+
+### 4.5 `POST /aws-kms/sign-transaction`
 Sui 트랜잭션 바이트를 **base64 문자열**로 전달하면, 직렬화된 Sui 서명을 반환합니다.
 
 *요청*
@@ -97,6 +107,33 @@ Content-Type: application/json
 
 {
   "txBytes": "AAABAAFgcG5P..."  // base64-encoded BCS 트랜잭션
+}
+```
+
+*성공 응답*
+```http
+200 OK
+{
+  "signature": "AQIGrH..."  // `flag||sig||pk` 직렬화 서명(base64)
+}
+```
+
+*실패 응답*
+```http
+400 Bad Request
+{ "error": "Signature error" }
+```
+
+### 4.6 `POST /aws-kms/sign-message`
+32바이트 **해시(Digest)** 값을 `0x` 프리픽스가 붙은 Hex 문자열로 전달하면, 해당 해시에 대한 직렬화된 Sui 서명을 반환합니다.
+
+*요청*
+```http
+POST /aws-kms/sign-message HTTP/1.1
+Content-Type: application/json
+
+{
+  "hash": "0x3e5f..."  // 32-byte digest(hex)
 }
 ```
 
