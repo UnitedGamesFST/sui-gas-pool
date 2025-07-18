@@ -1,6 +1,6 @@
 import "dotenv/config";
 import express from "express";
-import { fromBase64 } from "@mysten/sui/utils";
+import { fromBase64, toBase64 } from "@mysten/sui/utils";
 import { Secp256k1PublicKey } from "@mysten/sui/keypairs/secp256k1";
 import { getPublicKey, signAndVerify, signMessageHash } from "./awsUtils.js";
 import logger from "./logger.js";
@@ -28,6 +28,28 @@ async function main() {
                 : undefined;
             const suiPubkeyAddress = publicKeyToUse!.toSuiAddress();
             res.json({ suiPubkeyAddress });
+        } catch (error) {
+            console.error(error);
+            res.status(500).send("Internal server error");
+        }
+    });
+
+    // === Get Sui Public Key ===
+    app.get("/aws-kms/get-pubkey", async (_req, res) => {
+        try {
+            const keyId = process.env.AWS_KMS_KEY_ID || "";
+            const publicKey = await getPublicKey(keyId);
+            const publicKeyToUse = publicKey instanceof Secp256k1PublicKey
+                ? publicKey
+                : undefined;
+
+            if (!publicKeyToUse) {
+                return res.status(500).send("Failed to fetch public key");
+            }
+
+            const publicKeyBase64 = toBase64(publicKeyToUse.toRawBytes());
+
+            res.json({ publicKey: publicKeyBase64 });
         } catch (error) {
             console.error(error);
             res.status(500).send("Internal server error");
