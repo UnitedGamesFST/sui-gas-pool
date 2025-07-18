@@ -47,9 +47,9 @@ async function main() {
                 return res.status(500).send("Failed to fetch public key");
             }
 
-            const publicKeyBase64 = toBase64(publicKeyToUse.toRawBytes());
+            const publicKeyHex = '0x' + Buffer.from(publicKeyToUse.toRawBytes()).toString('hex');
 
-            res.json({ publicKey: publicKeyBase64 });
+            res.json({ publicKey: publicKeyHex });
         } catch (error) {
             console.error(error);
             res.status(500).send("Internal server error");
