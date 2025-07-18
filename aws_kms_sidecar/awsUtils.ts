@@ -300,14 +300,7 @@ export async function signMessageHash(digest: Uint8Array): Promise<{ signature: 
     // 2. Convert DER -> compact 64-byte
     const compactSig = getConcatenatedSignature(derSignature);
 
-    // 3. Fetch public key once (compressed 33-byte)
-    const pubkey = await getPublicKey(keyId);
-    const pubkeyToUse = pubkey instanceof Secp256k1PublicKey ? pubkey : undefined;
-    if (!pubkeyToUse) {
-        throw new Error("Unable to fetch public key");
-    }
-
-    // 4. (Optional) Verify via KMS to double-check
+    // 3. Verify via KMS to double-check
     const verifyCommand = new VerifyCommand({
         KeyId: keyId,
         Message: digest,
