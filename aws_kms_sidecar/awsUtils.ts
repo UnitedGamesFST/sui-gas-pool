@@ -280,10 +280,6 @@ export async function signAndVerify(tx_bytes: Uint8Array) {
  * Returns `{ signature: 0x<r||s hex> }` (compact 64B) after local verification.
  */
 export async function signMessageHash(digest: Uint8Array): Promise<{ signature: string }> {
-    if (digest.length !== 32) {
-        throw new Error("Digest must be 32 bytes");
-    }
-
     logger.info({ digest: toBase64(digest) }, "Signing message hash");
 
     const keyId = process.env.AWS_KMS_KEY_ID || "";
