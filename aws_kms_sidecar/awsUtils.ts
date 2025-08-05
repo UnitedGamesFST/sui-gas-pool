@@ -284,6 +284,8 @@ export async function signMessageHash(digest: Uint8Array): Promise<{ signature: 
         throw new Error("Digest must be 32 bytes");
     }
 
+    logger.info({ digest: toBase64(digest) }, "Signing message hash");
+
     const keyId = process.env.AWS_KMS_KEY_ID || "";
     const client = getKmsClient();
 
