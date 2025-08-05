@@ -77,7 +77,7 @@ async function main() {
     // === Sign Message Hash ===
     app.post("/aws-kms/sign-message", async (req, res) => {
         try {
-            const schema = z.object({ hash: z.string().regex(/^0x[0-9a-fA-F]{64}$/) });
+            const schema = z.object({ hash: z.string() });
             const parseResult = schema.safeParse(req.body);
             if (!parseResult.success) {
                 return res.status(400).json({ error: "Invalid request body" });
