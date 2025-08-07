@@ -98,7 +98,7 @@ impl GasPool {
         reservation_id: ReservationID,
         tx_data: TransactionData,
         user_sig: GenericSignature,
-    ) -> anyhow::Result<SuiTransactionBlockEffects> {
+    ) -> anyhow::Result<SuiTransactionBlockResponse> {
         let sponsor = tx_data.gas_data().owner;
         if !self.signer.is_valid_address(&sponsor) {
             bail!("Sponsor {:?} is not registered", sponsor);
@@ -188,10 +188,13 @@ impl GasPool {
         }
         info!(?reservation_id, "Transaction execution finished");
 
-        response.and_then(|r| {
-            r.effects
-                .ok_or_else(|| anyhow::anyhow!("Transaction execution failed: no effects returned"))
-        })
+        // effects 필드가 없으면 실패로 처리
+        if let Ok(ref resp) = response {
+            if resp.effects.is_none() {
+                return Err(anyhow::anyhow!("Transaction execution failed: no effects returned"));
+            }
+        }
+        response
     }
 
     async fn execute_transaction_impl(
