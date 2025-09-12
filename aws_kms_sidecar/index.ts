@@ -1,8 +1,8 @@
 import "dotenv/config";
 import express from "express";
-import { fromBase64 } from "@mysten/sui/utils";
+import { fromBase64, toBase64 } from "@mysten/sui/utils";
 import { Secp256k1PublicKey } from "@mysten/sui/keypairs/secp256k1";
-import { getPublicKey, signAndVerify } from "./awsUtils.js";
+import { getPublicKey, signAndVerify, signMessageHash } from "./awsUtils.js";
 import logger from "./logger.js";
 import { z } from "zod";
 
@@ -34,6 +34,28 @@ async function main() {
         }
     });
 
+    // === Get Sui Public Key ===
+    app.get("/aws-kms/get-pubkey", async (_req, res) => {
+        try {
+            const keyId = process.env.AWS_KMS_KEY_ID || "";
+            const publicKey = await getPublicKey(keyId);
+            const publicKeyToUse = publicKey instanceof Secp256k1PublicKey
+                ? publicKey
+                : undefined;
+
+            if (!publicKeyToUse) {
+                return res.status(500).send("Failed to fetch public key");
+            }
+
+            const publicKeyHex = '0x' + Buffer.from(publicKeyToUse.toRawBytes()).toString('hex');
+
+            res.json({ publicKey: publicKeyHex });
+        } catch (error) {
+            console.error(error);
+            res.status(500).send("Internal server error");
+        }
+    });
+
     app.post("/aws-kms/sign-transaction", async (req, res) => {
         try {
             const schema = z.object({ txBytes: z.string().max(10000) });
@@ -48,6 +70,27 @@ async function main() {
             res.json({ signature });
         } catch (err: any) {
             logger.error({ err }, "Signature generation failed");
+            res.status(400).json({ error: err.message ?? "Signature error" });
+        }
+    });
+
+    // === Sign Message Hash ===
+    app.post("/aws-kms/sign-message", async (req, res) => {
+        try {
+            const schema = z.object({ hash: z.string() });
+            const parseResult = schema.safeParse(req.body);
+            if (!parseResult.success) {
+                return res.status(400).json({ error: "Invalid request body" });
+            }
+
+            const hashHex = parseResult.data.hash.slice(2); // strip 0x
+            const digest = new Uint8Array(hashHex.match(/.{1,2}/g)!.map((b) => parseInt(b, 16)));
+
+            const { signature } = await signMessageHash(digest);
+
+            res.json({ signature });
+        } catch (err: any) {
+            logger.error({ err }, "Failed to sign message");
             res.status(400).json({ error: err.message ?? "Signature error" });
         }
     });
