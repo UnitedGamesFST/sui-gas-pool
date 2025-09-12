@@ -214,7 +214,8 @@ impl SuiClient {
                         tx.clone(),
                         SuiTransactionBlockResponseOptions::new()
                             .with_effects()
-                            .with_balance_changes(),
+                            .with_balance_changes()
+                            .with_events(),
                         Some(ExecuteTransactionRequestType::WaitForEffectsCert),
                     )
                     .await

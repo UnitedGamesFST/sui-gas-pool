@@ -268,7 +268,13 @@ async fn execute_tx_impl(
         .execute_transaction(reservation_id, tx_data, user_sig)
         .await
     {
-        Ok(effects) => {
+        Ok(tx_response) => {
+            let effects = tx_response
+                .effects
+                .as_ref()
+                .expect("Missing effects in tx response")
+                .clone();
+            let events = tx_response.events.clone();
             info!(
                 ?reservation_id,
                 "Successfully executed transaction {:?} with status: {:?}",
@@ -276,7 +282,7 @@ async fn execute_tx_impl(
                 effects.status()
             );
             metrics.num_successful_execute_tx_requests.inc();
-            (StatusCode::OK, Json(ExecuteTxResponse::new_ok(effects)))
+            (StatusCode::OK, Json(ExecuteTxResponse::new_ok(effects, events)))
         }
         Err(err) => {
             error!("Failed to execute transaction: {:?}", err);
